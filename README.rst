@@ -1,5 +1,5 @@
-pymodaq_plugins_template
-########################
+pymodaq_plugins_tcspc_arduino
+#############################
 
 .. the following must be adapted to your developed package, links to pypi, github  description...
 
@@ -25,8 +25,7 @@ Use this template to create a repository on your account and start the developme
 Authors
 =======
 
-* First Author  (myemail@xxx.org)
-* Other author (myotheremail@xxx.org)
+* Bernhard Lang  (bernhard.lang@unige.ch)
 
 .. if needed use this field
 
@@ -46,38 +45,10 @@ Instruments
 
 Below is the list of instruments included in this plugin
 
-Actuators
-+++++++++
-
-* **yyy**: control of yyy actuators
-* **xxx**: control of xxx actuators
-
-Viewer0D
-++++++++
-
-* **yyy**: control of yyy 0D detector
-* **xxx**: control of xxx 0D detector
-
 Viewer1D
 ++++++++
 
-* **yyy**: control of yyy 1D detector
-* **xxx**: control of xxx 1D detector
-
-
-Viewer2D
-++++++++
-
-* **yyy**: control of yyy 2D detector
-* **xxx**: control of xxx 2D detector
-
-
-PID Models
-==========
-
-
-Extensions
-==========
+**tcspc_arduino**: control of TCSPC Arduino 1D detector
 
 
 Installation instructions
