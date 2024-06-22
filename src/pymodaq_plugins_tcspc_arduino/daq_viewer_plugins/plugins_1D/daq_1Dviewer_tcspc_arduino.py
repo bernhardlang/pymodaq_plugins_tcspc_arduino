@@ -1,5 +1,5 @@
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 from pymodaq.utils.daq_utils import ThreadCommand
 from pymodaq.utils.data import DataFromPlugins, Axis, DataToExport
@@ -19,41 +19,48 @@ class TcspcWorker(QObject):
     def __init__(self, controller):
         QObject.__init__(self)
         self.controller = controller
+        self.worker_running = False
+        self._stop = False
 
-    def start(self, n_bins, max_time, max_counts):
-        stop = False
+    def start(self, n_bins, max_time, max_counts, x_axis):
+        if self.worker_running == True:
+            return
+
+        self.worker_running = True
+        self._stop = False
         total_hist = np.zeros(n_bins)
         self.controller.start_tcspc()
-        start_time = datetime.now()
-        while stop == False:
-            hist = float(self.controller.read_histogram())
-            self.total_hist += hist
-            do_save = False
-            if max_time is not None and self.start_time - datetime.now() >= 0:
-                do_save = True
-            if max_counts > 0 and max(self.total_hist) >= max_counts:
-                do_save = True            
+        end_time = datetime.now() + timedelta(seconds=max_time) if max_time > 0 \
+            else None
 
-            hist_data = [current_hist,total_hist]
+        while not self._stop:
+            hist = np.array(self.controller.read_histogram(), dtype=float)
+            total_hist += hist
+            do_save = False
+            if end_time is not None and datetime.now() >= end_time:
+                do_save = True
+            if max_counts > 0 and max(total_hist) >= max_counts:
+                do_save = True
+
+            hist_data = [hist,total_hist]
             dfp = DataFromPlugins(name='tcspc', data=hist_data, dim='Data1D',
-                                  labels=['current', 'total'],
-                                  axes=[self.x_axis], do_save=do_save)
+                                  labels=['current', 'total'], axes=[x_axis],
+                                  do_save=do_save)
             if do_save == True:
                 self.dte_signal.emit(DataToExport('tcspc', data=[dfp]))
                 break
+
             self.dte_signal_temp.emit(DataToExport('tcspc', data=[dfp]))
 
+        self.controller.stop()
+        self.worker_running = False
+
     def stop(self):
-        self.stop = True
+        self._stop = True
 
 
 class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
     """ Instrument plugin class for a 1D viewer.
-    
-    This object inherits all functionalities to communicate with PyMoDAQ’s 
-    DAQ_Viewer module through inheritance via
-    DAQ_Viewer_base. It makes a bridge between the DAQ_Viewer module and 
-    the Python wrapper of a particular instrument.
 
     TODO Complete the docstring of your plugin with:
         * The set of instruments that should be compatible with this 
@@ -69,11 +76,11 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
     controller: object
         The particular object that allow the communication with the hardware, 
         in general a python wrapper around the hardware library.
-         
+
     # TODO add your particular attributes here if any
 
     """
-    # live_mode_available = True
+    live_mode_available = True
     device_ids = list(TcspcArduinoController.available_ports.keys())
     default_device_id = \
         device_ids[0] if len(device_ids) > 0 else ''
@@ -93,7 +100,7 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
           'min': 0.1 },
         { 'title': 'Offset (µs)', 'name': 'offset', 'type': 'float', 'min': 0. },
         { 'title': 'Number of bins', 'name': 'n_bins', 'type': 'int',
-          'min': 10, 'max': 1000, 'value': 100 },
+          'min': 10, 'max': 10000, 'value': 400 },
         { 'title': 'Accumulation time (s)', 'name': 'max_time', 'type': 'float',
           'min': 0. },
         { 'title': 'Maximum counts', 'name': 'max_counts',
@@ -114,11 +121,10 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
               'min': 1, 'max': 1000000000, 'value': 3000000 },
         ]
 
-    start_worker = pyqtSignal(int, float, int)
+    start_worker = pyqtSignal(int, float, int, Axis)
 
     def ini_attributes(self):
         self.controller: TcspcArduinoController = None
-
 
     def commit_settings(self, param: Parameter):
         """Apply the consequences of a change of value in the detector settings
@@ -184,17 +190,21 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
                                new_controller=TcspcArduinoController())
         self.controller.connect()
 
+        self.live = False
         if len(self.device_ids) == 0: # simulation
-            for key in ['lifetime', 'time_zero', 'count_rate', 'dark_rate' ]:
+            for key in ['lifetime', 'time_zero', 'count_rate', 'dark_rate',
+                        'timeout', 'threshold', 'bin_size', 'offset', 'n_bins',
+                        'max_time', 'max_counts', 'refresh']:
                 self.commit_settings(Parameter(name=key,
                                                value=self.settings[key]))
+          
         self.emit_new_x_axis()
         self.thread = QThread()
         self.worker = TcspcWorker(self.controller)
         self.worker.moveToThread(self.thread)
         self.start_worker.connect(self.worker.start)
         self.worker.dte_signal_temp.connect(self.dte_signal_temp)
-        self.worker.dte_signal.connect(self.dte_signal)        
+        self.worker.dte_signal.connect(self.dte_signal)
         self.thread.start()
 
         info = "TCSPC Arduino successfully initialised"
@@ -209,9 +219,8 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
                               data=[np.zeros(n_bins), np.zeros(n_bins)],
                               dim='Data1D', labels=['current', 'total'],
                               axes=[self.x_axis])
-        self.dte_signal_temp.emit(DataToExport(name='tcspc_arduino',
-                                               data=[dfp]))
-        
+        self.dte_signal_temp.emit(DataToExport(name='tcspc_arduino', data=[dfp]))
+
     def close(self):
         """Terminate the communication protocol"""
         self.contoller.disconnect()
@@ -228,6 +237,20 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
         kwargs: dict
             others optionals arguments
         """
+        data_x_axis = self.controller.get_x_axis()
+        self.x_axis = Axis(data=data_x_axis, label='Time', units='µs')
+        if 'live' in kwargs:
+            if kwargs['live']:
+                self.start_worker.emit(self.controller.n_bins,
+                                       self.controller.max_time,
+                                       self.controller.max_counts, self.x_axis)
+                self.live = True
+                return
+
+            if self.live:
+                self.live = False
+                self.worker.stop()
+
         data_tot = self.controller.get_histogram()
         dfp = DataFromPlugins(name='TCSPC', data=data_tot,
                               dim='Data1D', labels=['current'],
@@ -235,10 +258,10 @@ class DAQ_1DViewer_tcspc_arduino(DAQ_Viewer_base):
         self.dte_signal.emit(DataToExport('tcspc_arduino', data=[dfp]))
 
     def stop(self):
-        self.controller.stop()
         self.worker.stop()
-        self.thread.quit()
-        self.thread.wait()
+        # where should we stop the worker thread? <<--
+#        self.thread.quit()
+#        self.thread.wait()
         return ''
 
 

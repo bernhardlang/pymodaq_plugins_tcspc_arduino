@@ -38,6 +38,7 @@ class TcspcArduinoController:
         self._count_rate = 10000
         self._dark_rate = 30000
         self.random_generator = np.random.default_rng()
+        self.acquisition_counter = 0
 
     def connect(self):
         if len(self.port) > 0:
@@ -64,12 +65,14 @@ class TcspcArduinoController:
         self.total_hist = np.zeros(self._n_bins)
         if self.simulating == False:
             self.sio.write(r'record\r')
-        self.start_time = datetime.now() if self._max_time > 0 else None
+        self.start_time = datetime.now() if self.max_time > 0 else None
+        self.acquisition_counter = 0
 
     def start_spc(self):
         self.is_acquiring = True
         if self.simulating == False:
             self.sio.write(r'rate\r')
+        self.acquisition_counter = 0
 
     def stop(self):
         self.is_acquiring = False
@@ -82,6 +85,7 @@ class TcspcArduinoController:
                            self._n_bins)
 
     def read_histogram(self):
+        self.acquisition_counter += 1
         if self.simulating == True:
             sleep(self._refresh)
             counts = self.random_generator.poisson(self.simulation_data)
@@ -91,7 +95,7 @@ class TcspcArduinoController:
         for i in range(self._n_bins):
             hist[i] = float(self.sio.readline())
         return hist
-        
+
     def get_histogram(self):
         if self.simulating == False:
             self.serial.write('record 1\r')
@@ -102,7 +106,7 @@ class TcspcArduinoController:
             sleep(self._refresh)
             return float(self.random_generator.poisson(self.count_rate))
         return float(self.sio.readline())
-        
+
     def get_rate(self):
         if self.simulating == False:
             self.serial.write('rate 1\r')
@@ -111,7 +115,7 @@ class TcspcArduinoController:
     def tcspc_loop(self):
         current_hist = self.read_histogram()
         self.total_hist += current_hist
-            
+
     def spc_loop(self):
         current_rate = self.read_rate()
         dfp = DataFromPlugins(name='tcspc', data=current_rate, dim='Data0D',
@@ -125,7 +129,7 @@ class TcspcArduinoController:
             return getattr(self, "_%s" % name)
         self.sio.write(r"%s\r", name)
         return self.sio.readline()
-        
+
     def set_property(self, name, value):
         if self.is_acquiring == True:
             raise RuntimeError("Must not set property during acquisition")
@@ -136,7 +140,7 @@ class TcspcArduinoController:
                 self.update_simulation_data()
         else:
             self.sio.write(r"%s %s\r" % (name, str(value)))
-        
+
     @property
     def threshold(self):
         return self.get_property('threshold')
@@ -194,7 +198,7 @@ class TcspcArduinoController:
         self.set_property('lifetime', r)
         if self.simulating == True:
             self.update_simulation_data()
-            
+
     @property
     def time_zero(self):
         return self.get_property('time_zero')
@@ -204,7 +208,7 @@ class TcspcArduinoController:
         self.set_property('time_zero', r)
         if self.simulating == True:
             self.update_simulation_data()
-            
+
     @property
     def count_rate(self):
         return self.get_property('count_rate')
@@ -214,7 +218,7 @@ class TcspcArduinoController:
         self.set_property('count_rate', r)
         if self.simulating == True:
             self.update_simulation_data()
-            
+
     @property
     def dark_rate(self):
         return self.get_property('dark_rate')
@@ -236,3 +240,4 @@ class TcspcArduinoController:
             np.where(time_scale >= time_zero,
                      dark + self.count_rate * np.exp(-time_scale / lifetime),
                      dark)
+
