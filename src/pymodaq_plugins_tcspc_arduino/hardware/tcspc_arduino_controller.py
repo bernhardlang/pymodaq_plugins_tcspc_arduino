@@ -240,4 +240,3 @@ class TcspcArduinoController:
             np.where(time_scale >= time_zero,
                      dark + self.count_rate * np.exp(-time_scale / lifetime),
                      dark)
-
